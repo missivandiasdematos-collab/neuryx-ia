@@ -29,6 +29,7 @@ type AnalysisResult = {
   responseTime: string;
   entryTiming: string;
   reasons: string[];
+  mode: "precheck";
 };
 
 const assets: Asset[] = [
@@ -121,7 +122,9 @@ export function DerivShell() {
   const [analysisMessage, setAnalysisMessage] = useState("Aguardando imagem");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [splashReady, setSplashReady] = useState(false);
+  const analyzingRef = useRef(false);
 
   const activeAsset = useMemo(
     () => assets.find((asset) => asset.id === activeAssetId) ?? assets[0],
@@ -158,59 +161,69 @@ export function DerivShell() {
   }, [previewUrl]);
 
   async function runAnalysis(file: File) {
+    if (analyzingRef.current) return;
+
+    analyzingRef.current = true;
+    setIsAnalyzing(true);
     setError(null);
     setResult(null);
     const startedAt = performance.now();
 
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      setError("Formato invalido. Envie PNG, JPG ou WEBP.");
-      setAnalysisMessage("Imagem recusada");
-      return;
+    try {
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+        setError("Formato invalido. Envie PNG, JPG ou WEBP.");
+        setAnalysisMessage("Imagem recusada");
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        setError("Imagem acima de 10MB. Envie uma captura menor.");
+        setAnalysisMessage("Imagem recusada");
+        return;
+      }
+
+      const nextPreview = URL.createObjectURL(file);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(nextPreview);
+
+      const inspection = await inspectImage(file);
+
+      if (inspection.width < 640 || inspection.height < 360) {
+        setError("Imagem muito pequena. Envie uma captura com o grafico mais visivel.");
+        setAnalysisMessage("Qualidade insuficiente");
+        return;
+      }
+
+      for (const message of pipelineMessages) {
+        setAnalysisMessage(message);
+        await new Promise((resolve) => window.setTimeout(resolve, 190));
+      }
+
+      const elapsed = Math.max(0.8, (performance.now() - startedAt) / 1000);
+      const confidence = Math.max(40, Math.min(90, Math.round(inspection.quality * 0.7 + 10)));
+
+      setResult({
+        quality: inspection.quality,
+        confidence,
+        decision: "NAO FAZER NADA",
+        responseTime: `${elapsed.toFixed(1)}s`,
+        entryTiming: "Sinal bloqueado ate conectar uma IA real",
+        mode: "precheck",
+        reasons: [
+          "Imagem validada para leitura visual.",
+          `${activeAsset.name} definido como contexto da tela.`,
+          "Esta versao estatica nao consulta IA, Binance, candles ou order book.",
+          "Por seguranca, nenhum sinal de COMPRA ou VENDA e fabricado.",
+        ],
+      });
+      setAnalysisMessage("Pre-validacao finalizada");
+    } catch {
+      setError("Nao foi possivel processar a imagem. Envie outro print em PNG, JPG ou WEBP.");
+      setAnalysisMessage("Erro no processamento");
+    } finally {
+      analyzingRef.current = false;
+      setIsAnalyzing(false);
     }
-
-    if (file.size > 10 * 1024 * 1024) {
-      setError("Imagem acima de 10MB. Envie uma captura menor.");
-      setAnalysisMessage("Imagem recusada");
-      return;
-    }
-
-    const nextPreview = URL.createObjectURL(file);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(nextPreview);
-
-    const inspection = await inspectImage(file);
-
-    if (inspection.width < 640 || inspection.height < 360) {
-      setError("Imagem muito pequena. Envie uma captura com o grafico mais visivel.");
-      setAnalysisMessage("Qualidade insuficiente");
-      return;
-    }
-
-    for (const message of pipelineMessages) {
-      setAnalysisMessage(message);
-      await new Promise((resolve) => window.setTimeout(resolve, 190));
-    }
-
-    const elapsed = Math.max(0.8, (performance.now() - startedAt) / 1000);
-    const confidence = Math.max(51, Math.min(93, Math.round(inspection.quality * 0.72 + 18)));
-    const decision: AnalysisResult["decision"] =
-      confidence >= 78 ? "COMPRA" : confidence >= 64 ? "NAO FAZER NADA" : "VENDA";
-
-    setResult({
-      quality: inspection.quality,
-      confidence,
-      decision,
-      responseTime: `${elapsed.toFixed(1)}s`,
-      entryTiming:
-        confidence >= 78 ? "Entrada em 46 segundos" : "Aguardar nova confirmacao visual",
-      reasons: [
-        "Captura com resolucao adequada para leitura visual.",
-        `${activeAsset.name} definido como contexto da analise.`,
-        "Sinais conflitantes reduzem entradas sem confirmacao.",
-        "Memoria evolutiva pronta para receber feedback.",
-      ],
-    });
-    setAnalysisMessage("Analise finalizada");
   }
 
   function handleFiles(files: FileList | null) {
@@ -254,6 +267,17 @@ export function DerivShell() {
     setActiveAssetId(assetId);
     setSidebarOpen(false);
   }
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen]);
 
   const timezoneLabel = getTimezoneLabel(timeZone);
   const statusText = visionConnected ? "Vision conectado" : "Vision desconectado";
@@ -401,6 +425,7 @@ export function DerivShell() {
                       className="upload-input"
                       type="file"
                       accept="image/png,image/jpeg,image/webp"
+                      disabled={isAnalyzing}
                       onChange={(event: ChangeEvent<HTMLInputElement>) => handleFiles(event.target.files)}
                     />
                     <span className="upload-inner">
@@ -410,7 +435,7 @@ export function DerivShell() {
                         <>
                           <UploadCloud className="upload-icon" size={84} strokeWidth={1.35} />
                           <span className="upload-copy">
-                            Clique ou arraste uma imagem para iniciar a analise
+                            {isAnalyzing ? "Processando imagem..." : "Clique ou arraste uma imagem para iniciar a analise"}
                           </span>
                           <span className="upload-meta">PNG, JPG ou WEBP ate 10MB</span>
                         </>
@@ -442,8 +467,8 @@ export function DerivShell() {
                         <div className="decision-copy">
                           <h2>{result.decision}</h2>
                           <p>
-                            {result.entryTiming}. A decisao usa a qualidade da captura, o ativo
-                            selecionado e a confluencia visual disponivel.
+                            {result.entryTiming}. A decisao abaixo nao substitui uma analise real
+                            com IA, Binance e order book.
                           </p>
                         </div>
                       </div>
