@@ -49,8 +49,8 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="NEURYX.IA - analise visual privada para graficos financeiros." />
     <title>NEURYX.IA | Analise visual</title>
-    <script type="module" crossorigin src="/assets/app.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/app.css" />
+    <script type="module" crossorigin src="./assets/app.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/app.css" />
   </head>
   <body>
     <div id="root"></div>
