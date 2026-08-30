@@ -6,7 +6,6 @@ const owner = "missivandiasdematos-collab";
 const repo = "neuryx-ia";
 const branch = "main";
 const token = execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
-
 const ignoredDirs = new Set([".git", "node_modules", "dist", ".next", ".vite"]);
 const ignoredFiles = new Set(["tsconfig.tsbuildinfo", "scripts/publish-github.mjs"]);
 
@@ -20,11 +19,8 @@ function collectFiles(dir, prefix = "") {
     if (ignoredDirs.has(entry.name) || ignoredFiles.has(entry.name)) continue;
     const fullPath = path.join(dir, entry.name);
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      files.push(...collectFiles(fullPath, relativePath));
-    } else if (entry.isFile()) {
-      files.push(relativePath);
-    }
+    if (entry.isDirectory()) files.push(...collectFiles(fullPath, relativePath));
+    if (entry.isFile()) files.push(relativePath);
   }
   return files;
 }
@@ -42,9 +38,7 @@ async function githubApi(endpoint, init = {}) {
   });
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    throw new Error(`${init.method ?? "GET"} ${endpoint} -> ${response.status}: ${text}`);
-  }
+  if (!response.ok) throw new Error(`${init.method ?? "GET"} ${endpoint} -> ${response.status}: ${text}`);
   return body;
 }
 
@@ -52,8 +46,8 @@ const ref = await githubApi(`/repos/${owner}/${repo}/git/ref/heads/${branch}`);
 const parentSha = ref.object.sha;
 const parentCommit = await githubApi(`/repos/${owner}/${repo}/git/commits/${parentSha}`);
 const files = collectFiles(process.cwd()).sort();
-
 const tree = [];
+
 for (const file of files) {
   const content = readFileSync(path.join(process.cwd(), file), "utf8");
   const blob = await githubApi(`/repos/${owner}/${repo}/git/blobs`, {
@@ -67,11 +61,10 @@ const nextTree = await githubApi(`/repos/${owner}/${repo}/git/trees`, {
   method: "POST",
   body: JSON.stringify({ base_tree: parentCommit.tree.sha, tree }),
 });
-
 const nextCommit = await githubApi(`/repos/${owner}/${repo}/git/commits`, {
   method: "POST",
   body: JSON.stringify({
-    message: "Fix Pages build and static analysis safeguards",
+    message: "Document real static app status",
     parents: [parentSha],
     tree: nextTree.sha,
   }),
